@@ -134,3 +134,5 @@
 /Users/joshsinclair/Projects/BFBotWitness/bin/Debug/netcoreapp3.1/zh-Hant/Microsoft.TestPlatform.CommunicationUtilities.resources.dll
 /Users/joshsinclair/Projects/BFBotWitness/bin/Debug/netcoreapp3.1/zh-Hant/Microsoft.TestPlatform.CrossPlatEngine.resources.dll
 /Users/joshsinclair/Projects/BFBotWitness/bin/Debug/netcoreapp3.1/zh-Hant/Microsoft.VisualStudio.TestPlatform.Common.resources.dll
+/Users/joshsinclair/Projects/BFBotWitness/bin/Debug/netcoreapp3.1/System.Windows.Forms.dll
+/Users/joshsinclair/Projects/BFBotWitness/bin/Debug/netcoreapp3.1/appsettings.json

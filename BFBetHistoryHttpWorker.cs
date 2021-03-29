@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,6 +15,35 @@ using BFBetHistoryWitness;
 
 namespace BFBetHistoryWitness
 {
+    
+    public interface IAccept {
+        Boolean Accept(object a);
+    }
+
+    public class AcceptAll : IAccept {
+        public Boolean Accept (Object a) {
+            return true;
+        }
+    }
+
+
+    /*
+    A class that implements the IAccept interface, compares a list of strings
+    that is injected on initialization to the BFBetHistoryItem.EventType
+    */
+    public class EventTypeFilter : IAccept {
+
+        private List<String> _acceptable;
+        internal EventTypeFilter(List<String> acceptable) {
+            _acceptable = acceptable;
+        }
+        public Boolean Accept(Object a) {
+            BFBetHistoryItem casted = (BFBetHistoryItem)a;
+            return _acceptable.Any(s=>casted.EventType.Equals(s));
+        }
+    }
+    
+    
     // Subscribes to the BetHistoryItemWitness and sends changes over http
     public class BFBetHistoryHttpWorker : IObserver<Object>
     {
@@ -22,15 +52,15 @@ namespace BFBetHistoryWitness
         Serilog.Core.Logger _logger;
 
         private List<BFBetHistoryItem> _requiresProcessing;
+        private IAccept _acceptItem;
 
-
-        internal BFBetHistoryHttpWorker(Serilog.Core.Logger logger)
-        {
-            _client = new HttpClient();
-            _client.DefaultRequestHeaders.Add("client", "30ccd1c2-7d9a-4b59-a625-db657aa58b84");
-            _client.DefaultRequestHeaders.Add("secret", "5650d740-741d-4281-a064-786d3789904a");
+        internal BFBetHistoryHttpWorker(HttpClient client,
+                                        Serilog.Core.Logger logger, 
+                                        IAccept acceptItem) {
+            _client=client;
             _requiresProcessing = new List<BFBetHistoryItem>();
             _logger = logger;
+            _acceptItem = acceptItem;
         }
 
         public virtual void OnCompleted()
@@ -46,7 +76,7 @@ namespace BFBetHistoryWitness
         private Dictionary<string, string> SerializeForPostPayload(BFBetHistoryItem item) {
             string status;
             if (item.Status == "" | item.Status == null) {
-                status = "BET_STATUS_UNMATCHED";
+                status = "BET_STATUS_OPEN_UNMATCHED";
             } else if (item.Status.ToLower() == "matched")
             {
                 status = "BET_STATUS_MATCHED";
@@ -146,7 +176,11 @@ namespace BFBetHistoryWitness
         public virtual async void OnNext(Object item)
         {
             BFBetHistoryItem castedItem = (BFBetHistoryItem)item;
-            await Task.Run(() => HandleRequest(castedItem));
+            if (_acceptItem.Accept(castedItem)) {
+                await Task.Run(() => HandleRequest(castedItem));
+            } else {
+                _logger.Information("BetID: " + castedItem.BetID.ToString() + " was rejected for HandlRequest");
+            }
 
             foreach (BFBetHistoryItem i in _requiresProcessing) {
                 await Task.Run(() => HandleRequest(i));

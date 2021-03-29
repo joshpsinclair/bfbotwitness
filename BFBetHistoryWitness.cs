@@ -153,13 +153,13 @@ public class BFBetHistoryItem
 
         public List<BFBetHistoryItem> CreateBFBetHistoryItemsFromDifferences() {
             // Check for any differences between now and last we checked
-            List<Object> differences = _changesWitness.Differences();
-            Console.WriteLine(differences.Count());
             List<BFBetHistoryItem> ret = new List<BFBetHistoryItem>();
-            foreach (DataRow r in differences) {
-                BFBetHistoryItem item = new BFBetHistoryItem(r["BetId"].ToString(),
+            try {
+                List<Object> differences = _changesWitness.Differences();
+                foreach (DataRow r in differences) {
+                    BFBetHistoryItem item = new BFBetHistoryItem(r["BetId"].ToString(),
                                                     r["BetType"].ToString(),
-                                                    r["Tipster"].ToString(),
+                                                    r["StrategyName"].ToString(),
                                                     r["Name"].ToString(),
                                                     float.Parse(r["PriceRequested"].ToString()),
                                                     float.Parse(r["AvgPrice"].ToString()),
@@ -169,7 +169,14 @@ public class BFBetHistoryItem
                                                     r["SelectionName"].ToString(),
                                                     r["startTime"].ToString(),
                                                     r["EventTypeName"].ToString());
-                ret.Add(item);
+                    ret.Add(item);
+                }
+            }
+            catch (System.Xml.XmlException exception) {
+                _logger.Warning(exception.ToString());
+            }
+            catch (Exception exception) {
+                _logger.Error(exception.ToString());
             }
             return ret;
         }

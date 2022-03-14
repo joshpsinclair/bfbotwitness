@@ -88,6 +88,7 @@ namespace BFBetHistoryWitness
 
             passwordLabel.Text="Password";
             passwordLabel.Location = new System.Drawing.Point(10, 80);
+            password.PasswordChar = '*';
 
             password.Text="Password";
             password.Location = new System.Drawing.Point(10, 105);

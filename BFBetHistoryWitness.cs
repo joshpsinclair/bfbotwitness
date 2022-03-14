@@ -96,6 +96,37 @@ public class BFBetHistoryItem
     public string EventType { get { return this.eventType;}}
    }
 
+   public class BFBetHistoryCopier : IObserver<Object> {
+
+        private String _filePath { get; set; }
+        private String _folderPath { get; set; }
+
+        public BFBetHistoryCopier(String filePath, String folderPath) {
+            _filePath=filePath;
+            _folderPath=folderPath;
+        }
+        public virtual void OnCompleted( ){
+       }
+
+        public virtual void OnError(Exception e) {
+        }
+
+        public static String FormatDateTime(DateTime dt) {
+            String y = dt.Date.Year.ToString();
+            String m = String.Format("{0:D2}", dt.Date.Month);
+            String d = String.Format("{0:D2}", dt.Date.Day);
+            return y+m+d;
+        }
+
+        public virtual void OnNext(Object o) {
+            System.IO.Directory.CreateDirectory(_folderPath);
+            String fileName = FormatDateTime(DateTime.Now)+".gz";
+            String destFile = System.IO.Path.Combine(_folderPath, fileName);
+            System.IO.File.Copy(_filePath, destFile, true);
+        }
+   }
+
+
 
     public class BFBetHistoryWorker : IObservable<Object>, IObserver<Object>
     {
@@ -156,6 +187,7 @@ public class BFBetHistoryItem
             List<BFBetHistoryItem> ret = new List<BFBetHistoryItem>();
             try {
                 List<Object> differences = _changesWitness.Differences();
+                _logger.Information("Found {n} changes since last execution", differences.Count());
                 foreach (DataRow r in differences) {
                     BFBetHistoryItem item = new BFBetHistoryItem(r["BetId"].ToString(),
                                                     r["BetType"].ToString(),

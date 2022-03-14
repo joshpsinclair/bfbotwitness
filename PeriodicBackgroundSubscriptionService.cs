@@ -10,7 +10,7 @@ namespace PeriodicBackgroundSubscriptionService {
 
     public class PeriodicService : BackgroundService, IObservable<Object>
         {
-            private readonly Serilog.Core.Logger _logger;
+            public readonly Serilog.Core.Logger _logger;
             private List<IObserver<Object>> _observers;
             private int _delay;
             
@@ -43,6 +43,7 @@ namespace PeriodicBackgroundSubscriptionService {
 
             protected override async Task ExecuteAsync(CancellationToken stoppingToken)
             {
+                
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     Object n = new Object();
@@ -59,6 +60,18 @@ namespace PeriodicBackgroundSubscriptionService {
                 base.Dispose();
             }
         }
+
+    public class P1 : PeriodicService {
+        public P1(Serilog.Core.Logger logger, int delay) : base(logger, delay) {
+
+        }
+    }
+
+     public class P2 : PeriodicService {
+        public P2(Serilog.Core.Logger logger, int delay) : base(logger, delay) {
+            
+        }
+    }
     
     public class Unsubscriber<Object> : IDisposable
         {

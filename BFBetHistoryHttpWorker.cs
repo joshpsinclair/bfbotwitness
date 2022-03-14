@@ -49,15 +49,18 @@ namespace BFBetHistoryWitness
     {
 
         private HttpClient _client;
+        private SessionData _sessionData;
         Serilog.Core.Logger _logger;
 
         private List<BFBetHistoryItem> _requiresProcessing;
         private IAccept _acceptItem;
 
         internal BFBetHistoryHttpWorker(HttpClient client,
+                                        SessionData sessionData,
                                         Serilog.Core.Logger logger, 
                                         IAccept acceptItem) {
             _client=client;
+            _sessionData=sessionData;
             _requiresProcessing = new List<BFBetHistoryItem>();
             _logger = logger;
             _acceptItem = acceptItem;
@@ -79,7 +82,7 @@ namespace BFBetHistoryWitness
                 status = "BET_STATUS_OPEN_UNMATCHED";
             } else if (item.Status.ToLower() == "matched")
             {
-                status = "BET_STATUS_MATCHED";
+                status = "BET_STATUS_OPEN_MATCHED";
             } else if (item.Status.ToLower() == "settled") 
             {
                 status = "BET_STATUS_SETTLED";
@@ -109,6 +112,12 @@ namespace BFBetHistoryWitness
             return payload;
         }
 
+        private static HttpRequestMessage CookiedRequest(Tokens t) {
+            HttpRequestMessage request = new HttpRequestMessage();
+            request.Headers.Add("Cookie",  "csrftoken="+t.csrftoken+"; "+"sessionid="+t.sessionid);
+            return request;
+        }
+
         private async void HandleRequest(BFBetHistoryItem item)
         {
             int maxTries=3;
@@ -119,18 +128,30 @@ namespace BFBetHistoryWitness
                 _logger.Information("{url}", url);
                 try {
                     // If it doesnt exist we need to create it
-                    var existsResponse = await _client.GetAsync(url);
+                    HttpRequestMessage existsRequest = CookiedRequest(_sessionData.tokens);
+                    existsRequest.Method=HttpMethod.Get;
+                    existsRequest.RequestUri= new Uri(url);
+                    var existsResponse = await _client.SendAsync(existsRequest);
+                    
+                    // depending on the result of our exists reqest either put or post
+                    HttpRequestMessage createUpdateRequest = CookiedRequest(_sessionData.tokens);
                     HttpResponseMessage createUpdateResponse;
+                    
                     _logger.Information("{status}", existsResponse.StatusCode);
                     if (existsResponse.IsSuccessStatusCode == false)
                     {
-                        createUpdateResponse=await _client.PostAsync("https://www.over250k.com:9000/api/horses/placedbets/", content);
+                        createUpdateRequest.Method=HttpMethod.Post;
+                        createUpdateRequest.RequestUri = new Uri("https://www.over250k.com:9000/api/horses/placedbets/");
+                        createUpdateRequest.Content=content;
                         _logger.Information("Creating resource for {payload}", payload);
                     } else {
-                        createUpdateResponse=await _client.PutAsync("https://www.over250k.com:9000/api/horses/placedbets/" + item.BetID + "/", content);
+                        createUpdateRequest.Method=HttpMethod.Put;
+                        createUpdateRequest.RequestUri = new Uri("https://www.over250k.com:9000/api/horses/placedbets/" + item.BetID + "/");
+                        createUpdateRequest.Content=content;
                         _logger.Information("Updating resource for {payload}", payload);
                     }
 
+                    createUpdateResponse = await _client.SendAsync(createUpdateRequest);
                     // Create or update the existing record
                     if (createUpdateResponse.IsSuccessStatusCode) {
                         var contentStream = await createUpdateResponse.Content.ReadAsStreamAsync();
@@ -175,16 +196,27 @@ namespace BFBetHistoryWitness
 
         public virtual async void OnNext(Object item)
         {
-            BFBetHistoryItem castedItem = (BFBetHistoryItem)item;
-            if (_acceptItem.Accept(castedItem)) {
-                await Task.Run(() => HandleRequest(castedItem));
-            } else {
-                _logger.Information("BetID: " + castedItem.BetID.ToString() + " was rejected for HandlRequest");
-            }
+            Type t = item.GetType();
+            if (t.Equals(typeof(SessionData))) {
+                SessionData sd = (SessionData)item;
+                _sessionData=sd;
+                var handler = new HttpClientHandler {UseCookies = false};
+                _client = new HttpClient(handler);
+                _client.DefaultRequestHeaders.Add("X-CSRFTOKEN", sd.tokens.csrftoken);
+                _logger.Information("Obtained new SessionData {sd}", sd.tokens.sessionid);
+            } else if (t.Equals(typeof(BFBetHistoryItem))) {
+                BFBetHistoryItem castedItem = (BFBetHistoryItem)item;
+                if (_acceptItem.Accept(castedItem)) {
+                    await Task.Run(() => HandleRequest(castedItem));
+                } else {
+                    _logger.Information("BetID: " + castedItem.BetID.ToString() + " was rejected for HandleRequest");
+                }
 
-            foreach (BFBetHistoryItem i in _requiresProcessing) {
-                await Task.Run(() => HandleRequest(i));
+                foreach (BFBetHistoryItem i in _requiresProcessing) {
+                    await Task.Run(() => HandleRequest(i));
+                }
             }
         }
+        
     }
 }

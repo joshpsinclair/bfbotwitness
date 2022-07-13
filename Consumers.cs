@@ -8,14 +8,22 @@ using Serilog;
 using System.IO;
 using Newtonsoft.Json;
 using System.Net.Http;
-using DataSetCreator;
-using Differences;
-using PeriodicBackgroundSubscriptionService;
-using BFBetHistoryWitness;
+using BFBotWitness;
 
-namespace BFBetHistoryWitness
+namespace BFBotWitness
 {
-    
+
+    public interface IHttpHost {
+        String Protocol();
+        String Host();
+        String Port();
+        String FullyQualifiedHost();
+    }
+
+    public interface IHttpEndpoint {
+        Uri BuildEndpoint(Dictionary<String, String> p);
+    }
+
     public interface IAccept {
         Boolean Accept(object a);
     }
@@ -26,6 +34,63 @@ namespace BFBetHistoryWitness
         }
     }
 
+    public class HttpHost : IHttpHost {
+        private String _protocol;
+        private String _host;
+        private String _port;
+
+        public HttpHost(String protocol, String host, String port) {
+            _protocol=protocol;
+            _host=host;
+            _port=port;
+        }
+
+        public String Protocol() {
+            return _protocol;
+        }
+
+        public String Host() {
+            return _host;
+        }
+
+        public String Port() {
+            return _port;
+        }
+
+        public String FullyQualifiedHost() {
+            return _protocol+"://"+_host+":"+_port;
+        }
+    }
+
+    public class BaseHttpEndpoint : IHttpEndpoint {
+        public String Endpoint;
+
+        public BaseHttpEndpoint(String endpoint) {
+            Endpoint=endpoint;
+        }
+
+        public String FormatEndpointWithParams(Dictionary<String, String> p) {
+            String formattedEndpoint = (String)Endpoint.Clone();
+            foreach(var d in p) formattedEndpoint = formattedEndpoint.Replace('{'+d.Key+'}', d.Value);
+            return formattedEndpoint;
+        }
+
+        public virtual Uri BuildEndpoint(Dictionary<String, String> p) {
+            return new Uri(FormatEndpointWithParams(p));
+        }
+    }
+
+    public class HttpHostEndpoint : BaseHttpEndpoint {
+        private IHttpHost _httpHost;
+
+        public HttpHostEndpoint(IHttpHost httpHost, String endpoint) : base(endpoint) {
+            _httpHost=httpHost;
+        }
+
+        public override Uri BuildEndpoint(Dictionary<String, String> p) {
+            return new Uri(_httpHost.FullyQualifiedHost()+'/'+base.FormatEndpointWithParams(p));
+        }
+    }
 
     /*
     A class that implements the IAccept interface, compares a list of strings
@@ -42,14 +107,47 @@ namespace BFBetHistoryWitness
             return _acceptable.Any(s=>casted.EventType.Equals(s));
         }
     }
+
+    // Subscribes to the bethistory.modified events, making backups of the raw compressed file
+    public class BFBetHistoryCopier : IBFBotConsumer {
+
+        private String _filePath { get; set; }
+        private String _folderPath { get; set; }
+
+        public BFBetHistoryCopier(String filePath, String folderPath) {
+            _filePath=filePath;
+            _folderPath=folderPath;
+        }
+        public virtual void OnCompleted( ){
+       }
+
+        public virtual void OnError(Exception e) {
+        }
+
+        public static String FormatDateTime(DateTime dt) {
+            String y = dt.Date.Year.ToString();
+            String m = String.Format("{0:D2}", dt.Date.Month);
+            String d = String.Format("{0:D2}", dt.Date.Day);
+            return y+m+d;
+        }
+
+        public virtual void OnNext(Object o) {
+            System.IO.Directory.CreateDirectory(_folderPath);
+            String fileName = FormatDateTime(DateTime.Now)+".gz";
+            String destFile = System.IO.Path.Combine(_folderPath, fileName);
+            System.IO.File.Copy(_filePath, destFile, true);
+        }
+   }
     
     
-    // Subscribes to the BetHistoryItemWitness and sends changes over http
-    public class BFBetHistoryHttpWorker : IObserver<Object>
+    // Subscribes and handles the bethistory.modified and sessiondata.modified events 
+    public class BFBetHistoryHttpWorker : IBFBotConsumer
     {
 
         private HttpClient _client;
         private SessionData _sessionData;
+        private IHttpEndpoint _listResourceEndpoint;
+        private IHttpEndpoint _individualResourceEndpoint;
         Serilog.Core.Logger _logger;
 
         private List<BFBetHistoryItem> _requiresProcessing;
@@ -58,12 +156,16 @@ namespace BFBetHistoryWitness
         internal BFBetHistoryHttpWorker(HttpClient client,
                                         SessionData sessionData,
                                         Serilog.Core.Logger logger, 
-                                        IAccept acceptItem) {
+                                        IAccept acceptItem,
+                                        IHttpEndpoint listResourceEndpoint,
+                                        IHttpEndpoint individualResourceEndpoint) {
             _client=client;
             _sessionData=sessionData;
             _requiresProcessing = new List<BFBetHistoryItem>();
             _logger = logger;
             _acceptItem = acceptItem;
+            _listResourceEndpoint = listResourceEndpoint;
+            _individualResourceEndpoint = individualResourceEndpoint;
         }
 
         public virtual void OnCompleted()
@@ -88,7 +190,7 @@ namespace BFBetHistoryWitness
                 status = "BET_STATUS_SETTLED";
             } else 
             {
-                status = "BET_STATUS_UNKOWN";
+                status = "BET_STATUS_UNKNOWN";
             }
             string tipster;
                 if (item.Tipster == "" | item.Tipster == null) {
@@ -114,39 +216,37 @@ namespace BFBetHistoryWitness
 
         private static HttpRequestMessage CookiedRequest(Tokens t) {
             HttpRequestMessage request = new HttpRequestMessage();
-            request.Headers.Add("Cookie",  "csrftoken="+t.csrftoken+"; "+"sessionid="+t.sessionid);
+            request.Headers.Add("Cookie",  "csrftoken="+t.CsrfToken+"; "+"sessionid="+t.SessionId);
             return request;
         }
 
-        private async void HandleRequest(BFBetHistoryItem item)
+        private async Task HandleRequest(BFBetHistoryItem item)
         {
             int maxTries=3;
             Dictionary<string, string> payload=SerializeForPostPayload(item);
             for (int attemptNumber=1; attemptNumber <= maxTries; attemptNumber++) {
                 var content = new FormUrlEncodedContent(payload);
-                string url = "https://www.over250k.com:9000/api/horses/placedbets/" + item.BetID + "/";
-                _logger.Information("{url}", url);
                 try {
                     // If it doesnt exist we need to create it
-                    HttpRequestMessage existsRequest = CookiedRequest(_sessionData.tokens);
+                    HttpRequestMessage existsRequest = CookiedRequest(_sessionData.Tokens);
                     existsRequest.Method=HttpMethod.Get;
-                    existsRequest.RequestUri= new Uri(url);
+                    existsRequest.RequestUri=_individualResourceEndpoint.BuildEndpoint(new Dictionary<String, String> {{"id", item.BetID}});
                     var existsResponse = await _client.SendAsync(existsRequest);
                     
                     // depending on the result of our exists reqest either put or post
-                    HttpRequestMessage createUpdateRequest = CookiedRequest(_sessionData.tokens);
+                    HttpRequestMessage createUpdateRequest = CookiedRequest(_sessionData.Tokens);
                     HttpResponseMessage createUpdateResponse;
                     
                     _logger.Information("{status}", existsResponse.StatusCode);
                     if (existsResponse.IsSuccessStatusCode == false)
                     {
                         createUpdateRequest.Method=HttpMethod.Post;
-                        createUpdateRequest.RequestUri = new Uri("https://www.over250k.com:9000/api/horses/placedbets/");
+                        createUpdateRequest.RequestUri = _listResourceEndpoint.BuildEndpoint(new Dictionary<String, String> {});
                         createUpdateRequest.Content=content;
                         _logger.Information("Creating resource for {payload}", payload);
                     } else {
                         createUpdateRequest.Method=HttpMethod.Put;
-                        createUpdateRequest.RequestUri = new Uri("https://www.over250k.com:9000/api/horses/placedbets/" + item.BetID + "/");
+                        createUpdateRequest.RequestUri =_individualResourceEndpoint.BuildEndpoint(new Dictionary<String, String> {{"id", item.BetID}});
                         createUpdateRequest.Content=content;
                         _logger.Information("Updating resource for {payload}", payload);
                     }
@@ -164,9 +264,11 @@ namespace BFBetHistoryWitness
                             _logger.Information("Successfully created/updated. {item}, {response}", 
                                                 item, 
                                                 responsePayload);
+                            Console.WriteLine("Success! 1");
                         } catch (JsonReaderException e) {
                             _logger.Warning(e, "Successfully created/updated, however there was an error" +
                             "deserialzing the response {item}", item);
+                            Console.WriteLine("Success! 2");
                         }
                     } else {
                         var contentStream = await createUpdateResponse.Content.ReadAsStreamAsync();
@@ -194,26 +296,26 @@ namespace BFBetHistoryWitness
             }
         }
 
-        public virtual async void OnNext(Object item)
+        public virtual void OnNext(Object item)
         {
-            Type t = item.GetType();
-            if (t.Equals(typeof(SessionData))) {
-                SessionData sd = (SessionData)item;
+            BFBotEvent e = (BFBotEvent)item;
+            if (e.Id == "sessiondata.modified") {
+                SessionData sd = (SessionData)e.Payload;
                 _sessionData=sd;
                 var handler = new HttpClientHandler {UseCookies = false};
                 _client = new HttpClient(handler);
-                _client.DefaultRequestHeaders.Add("X-CSRFTOKEN", sd.tokens.csrftoken);
-                _logger.Information("Obtained new SessionData {sd}", sd.tokens.sessionid);
-            } else if (t.Equals(typeof(BFBetHistoryItem))) {
-                BFBetHistoryItem castedItem = (BFBetHistoryItem)item;
+                _client.DefaultRequestHeaders.Add("X-CSRFTOKEN", sd.Tokens.CsrfToken);
+                _logger.Information("Obtained new SessionData {sd}", sd.Tokens.SessionId);
+            } else if (e.Id == "bethistory.modified") {
+                BFBetHistoryItem castedItem = (BFBetHistoryItem)e.Payload;
                 if (_acceptItem.Accept(castedItem)) {
-                    await Task.Run(() => HandleRequest(castedItem));
+                    Task.Run(() => HandleRequest(castedItem));
                 } else {
                     _logger.Information("BetID: " + castedItem.BetID.ToString() + " was rejected for HandleRequest");
                 }
 
                 foreach (BFBetHistoryItem i in _requiresProcessing) {
-                    await Task.Run(() => HandleRequest(i));
+                    Task.Run(() => HandleRequest(castedItem));
                 }
             }
         }

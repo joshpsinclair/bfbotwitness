@@ -3,7 +3,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>netcoreapp3.1</TargetFramework>
-    <StartupObject>BFBetHistoryWitness.Program</StartupObject>
+    <StartupObject>BFBotWitness.Program</StartupObject>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="HttpMock" Version="2.3.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="5.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="5.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.8.0" />
@@ -25,5 +26,15 @@
     <PackageReference Include="Serilog.Sinks.File" Version="4.1.0" />
     <PackageReference Include="System.Windows.Forms" Version="4.0.0.0" />
   </ItemGroup>
+
+  <Target Name="CopyExtraFiles" AfterTargets="Build">
+    <ItemGroup>
+      <DataFiles Include="$(ProjectDir)\AdditionalFiles\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(DataFiles)" DestinationFolder="$(TargetDir)\" SkipUnchangedFiles="true" />
+  </Target>
+
+
 
 </Project>

@@ -226,5 +226,5 @@ project.lock.json
 
 # Custom Settings
 *.gz
-*.xml
 appsettings.json
+AdditionalFiles/endpoints.json

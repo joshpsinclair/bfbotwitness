@@ -235,6 +235,7 @@ namespace BFBotWitness
                             .CreateLogger();
 
             // If we dont have a bet history file saved try to automatically find it
+            logger.Information("Attempting to automatically find bet history file...");
             if (witnessConfig.BFBetHistoryPath == "") {
                 String profilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Local");
                 String searchDir = profilePath;
@@ -249,7 +250,6 @@ namespace BFBotWitness
                         }
                     } catch (Exception exception) {
                         // We dont handle any errors, if we cant find the file the user can select it themselves
-                        logger.Warning(exception.ToString());
                     }
                 }
             }

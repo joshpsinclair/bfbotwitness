@@ -27,14 +27,12 @@
     <PackageReference Include="System.Windows.Forms" Version="4.0.0.0" />
   </ItemGroup>
 
-  <Target Name="CopyExtraFiles" AfterTargets="Build">
+  <Target Name="CopyExtraFiles" AfterTargets="Build;AfterPublish">
     <ItemGroup>
       <DataFiles Include="$(ProjectDir)\AdditionalFiles\*.*" />
     </ItemGroup>
 
     <Copy SourceFiles="@(DataFiles)" DestinationFolder="$(TargetDir)\" SkipUnchangedFiles="true" />
   </Target>
-
-
 
 </Project>
